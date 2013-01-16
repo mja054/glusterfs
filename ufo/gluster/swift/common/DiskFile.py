@@ -294,9 +294,13 @@ class Gluster_DiskFile(DiskFile):
                         write_metadata(self.data_file, self.metadata)
 
                 return file_size
+        # We should catch both OSError and IOError because os_path.getsize will
+        # raise OSError and write_metadata failure will raise IOError
         except OSError as err:
             if err.errno != errno.ENOENT:
                 raise
+        except IOError:
+            raise
         raise DiskFileNotExist('Data File does not exist.')
 
     def filter_metadata(self):

@@ -33,7 +33,6 @@ from gluster.swift.common.utils import DEFAULT_UID, DEFAULT_GID, X_TYPE, \
 from test_utils import _initxattr, _destroyxattr
 from test.unit import FakeLogger
 
-
 _metadata = {}
 
 def _mock_read_metadata(filename):
@@ -636,40 +635,6 @@ class TestDiskFile(unittest.TestCase):
         finally:
             shutil.rmtree(td)
 
-    def test_unlinkold_file_unlink_error(self):
-        td = tempfile.mkdtemp()
-        the_path = os.path.join(td, "vol0", "bar")
-        the_file = os.path.join(the_path, "z")
-        try:
-            os.makedirs(the_path)
-            with open(the_file, "wb") as fd:
-                fd.write("1234")
-            gdf = Gluster_DiskFile(td, "vol0", "p57", "ufo47", "bar",
-                                   "z", self.lg)
-            assert gdf._obj == "z"
-            assert gdf.data_file == the_file
-            assert not gdf._is_dir
-
-            later = float(gdf.metadata['X-Timestamp']) + 1
-
-            stats = os.stat(the_path)
-            os.chmod(the_path, stats.st_mode & (~stat.S_IWUSR))
-
-            # Handle the case do_unlink() raises an OSError
-            try:
-                gdf.unlinkold(normalize_timestamp(later))
-            except OSError as e:
-                assert e.errno != errno.ENOENT
-            else:
-                self.fail("Excepted an OSError when unlinking file")
-            finally:
-                os.chmod(the_path, stats.st_mode)
-
-            assert os.path.isdir(gdf.datadir)
-            assert os.path.exists(os.path.join(gdf.datadir, gdf._obj))
-        finally:
-            shutil.rmtree(td)
-
     def test_unlinkold_is_dir(self):
         td = tempfile.mkdtemp()
         the_path = os.path.join(td, "vol0", "bar")
@@ -707,7 +672,16 @@ class TestDiskFile(unittest.TestCase):
             finally:
                 os.chmod(gdf.datadir, stats.st_mode)
             assert os.path.isdir(gdf.datadir)
-            assert os.path.isdir(gdf.data_file)
+
+            # This try block is required because gdf.datafile is set to null in
+            # Gluster_DiskFile.__init__ if the file doesn't exist. So, when we
+            # do os.path.isdir it returns a TypeError.
+            try:
+                os.path.isdir(gdf.data_file)
+            except TypeError as err:
+                pass
+            else:
+                raise TypeError('Exception Expected')
         finally:
             shutil.rmtree(td)
 
@@ -782,32 +756,6 @@ class TestDiskFile(unittest.TestCase):
         finally:
             shutil.rmtree(td)
 
-    def test_get_data_file_size_os_err(self):
-        td = tempfile.mkdtemp()
-        the_path = os.path.join(td, "vol0", "bar")
-        the_file = os.path.join(the_path, "z")
-        try:
-            os.makedirs(the_path)
-            with open(the_file, "wb") as fd:
-                fd.write("1234")
-            gdf = Gluster_DiskFile(td, "vol0", "p57", "ufo47", "bar",
-                                   "z", self.lg)
-            assert gdf._obj == "z"
-            assert gdf.data_file == the_file
-            assert not gdf._is_dir
-            stats = os.stat(the_path)
-            os.chmod(the_path, 0)
-            try:
-                s = gdf.get_data_file_size()
-            except OSError as err:
-                assert err.errno != errno.ENOENT
-            else:
-                self.fail("Expected OSError exception")
-            finally:
-                os.chmod(the_path, stats.st_mode)
-        finally:
-            shutil.rmtree(td)
-
     def test_get_data_file_size_dir(self):
         td = tempfile.mkdtemp()
         the_path = os.path.join(td, "vol0", "bar")
@@ -873,7 +821,17 @@ class TestDiskFile(unittest.TestCase):
                 assert os.path.dirname(saved_tmppath) == gdf.tmpdir
                 assert os.path.exists(saved_tmppath)
                 os.write(fd, "123")
+
+            # At the end of previous with block a close on fd is called.
+            # Calling os.close on the same fd will raise an OSError
+            # exception and we must catch it.
+            try:
                 os.close(fd)
+            except OSError as err:
+                pass
+            else:
+                raise OSError("Exception Expected")
+
             assert not os.path.exists(saved_tmppath)
         finally:
             shutil.rmtree(td)
